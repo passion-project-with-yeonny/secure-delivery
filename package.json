@@ -1,0 +1,49 @@
+{
+  "name": "secure-delivery",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Turns a successful Stripe payment into a short-lived, signed download link served from a private R2 bucket.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "cloudflare": {
+    "label": "Secure Digital Delivery",
+    "products": ["Workers", "R2"],
+    "bindings": {
+      "ALLOWED_ORIGIN": {
+        "description": "REQUIRED. The exact origin of your live site, used for CORS. No trailing slash. Example: https://your-site.framer.website"
+      },
+      "TOKEN_TTL_MINUTES": {
+        "description": "How long each download/watch link stays valid, in minutes. 1440 = 24 hours."
+      },
+      "SENDER_NAME": {
+        "description": "Display name shown as the sender on delivery emails (optional email feature)."
+      },
+      "SENDER_EMAIL": {
+        "description": "From-address for delivery emails (optional email feature)."
+      },
+      "TOKEN_SIGNING_SECRET": {
+        "description": "REQUIRED. Any long random string — signs your download tokens. Generate one at: https://generate-random.org/api-key-generator"
+      },
+      "BREVO_API_KEY": {
+        "description": "OPTIONAL. Brevo API key (xkeysib-…) to save visitor emails to your Brevo contacts automatically. Leave blank to skip."
+      },
+      "FREE_PRODUCT_KEY": {
+        "description": "FREE template: the exact filename of your freebie in the R2 bucket (e.g. free-checklist.pdf). Must match the file you upload in R2 exactly.",
+        "optional": true
+      },
+      "FREE_PRODUCT_FILENAME": {
+        "description": "OPTIONAL. What the visitor's browser saves the file as (e.g. My-Free-Checklist.pdf). Defaults to FREE_PRODUCT_KEY if blank.",
+        "optional": true
+      },
+      "FREE_PRODUCT_NAME": {
+        "description": "OPTIONAL. A friendly display name for logs (e.g. Free Checklist).",
+        "optional": true
+      }
+    }
+  }
+}

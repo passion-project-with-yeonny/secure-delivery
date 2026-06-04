@@ -1,0 +1,21 @@
+# These are the SECRETS the worker needs. The "Deploy to Cloudflare" button reads
+# this file and prompts you to enter each value securely during setup — you do
+# NOT commit real values here. (For local testing only, copy this file to
+# `.dev.vars` and fill it in; `.dev.vars` is gitignored.)
+
+# REQUIRED — any long random string. Signs the download tokens so they can't be forged.
+# Generate one at: https://generate-random.org/api-key-generator
+TOKEN_SIGNING_SECRET=
+
+# OPTIONAL — Brevo API key (xkeysib-…).
+# Paste this if you want visitor emails saved to your Brevo contacts automatically.
+# No email is sent, so it never uses your daily send limit. Leave blank to skip.
+BREVO_API_KEY=
+
+# ── PAID TEMPLATE ONLY — leave blank if you are using the free template ──────
+# Add these later via the Cloudflare dashboard (Workers → secure-delivery →
+# Settings → Variables) if you set up the paid checkout flow.
+#
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# BREVO_FULFILLMENT_TEMPLATE_ID=

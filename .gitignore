@@ -1,0 +1,10 @@
+# Never commit real secrets
+.dev.vars
+.env
+.env.*
+
+# Tooling
+node_modules/
+.wrangler/
+dist/
+.DS_Store

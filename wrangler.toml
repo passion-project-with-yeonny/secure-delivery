@@ -1,0 +1,50 @@
+name = "secure-delivery"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# ── R2 bucket that holds your downloadable files (PDFs, templates, zips) ──────
+# The Deploy to Cloudflare button auto-creates this bucket for you during setup.
+# After deploying, upload your files into it from the Cloudflare dashboard
+# (R2 → this bucket → Upload). No command line needed.
+[[r2_buckets]]
+binding = "ASSETS"            # the Worker refers to this as env.ASSETS
+bucket_name = "product-files" # your files live here
+
+# ── OPTIONAL (FREE template) — store captured emails so you can export them ────
+# Only needed if you use POST /free-download and want to keep the leads. Create a
+# KV namespace in the dashboard (Storage & Databases → KV), then uncomment and
+# paste its id. Without this, free-download emails are not stored (still works).
+# [[kv_namespaces]]
+# binding = "LEADS"
+# id = "your_kv_namespace_id"
+
+# ── Plain (non-secret) settings — the deploy form will ask you for these ──────
+[vars]
+# REQUIRED. The exact origin of your live site, used for CORS. No trailing slash.
+# Example: https://your-site.framer.website
+ALLOWED_ORIGIN = "https://simple-product-listing.framer.website/"
+# How long a minted download/watch link stays valid, in minutes. 1440 = 24 hours.
+TOKEN_TTL_MINUTES = "1440"
+# ── FREE template — your freebie, set here (or in the Deploy form). NO CODE EDIT ──
+# FREE_PRODUCT_KEY      = the file's name in your R2 bucket, e.g. "free-checklist.pdf"
+# FREE_PRODUCT_FILENAME = what the visitor's browser saves it as (optional)
+# FREE_PRODUCT_NAME     = a friendly display name (optional)
+FREE_PRODUCT_KEY = "Fitness_Wellness_Template_Overview.pdf"
+FREE_PRODUCT_FILENAME = "Fitness_Wellness_Template_Overview.pdf"
+FREE_PRODUCT_NAME = "Fitness_Wellness_Template_Overview.pdf"
+# Display name + address shown as the sender on delivery emails (optional feature).
+SENDER_NAME = "Passion Project With Yeonny"
+SENDER_EMAIL = "yeonny@passion-project-with-yeonny.com"
+# OPTIONAL (FREE template). If you set BREVO_API_KEY and want /free-download leads
+# dropped onto a specific Brevo list, put its numeric list id here. Adding a
+# contact does NOT send an email, so it never counts against your send limit.
+# BREVO_LIST_ID = "3"
+
+# ── SECRETS ──────────────────────────────────────────────────────────────────
+# Never written here. They are declared in .dev.vars.example so the Deploy to
+# Cloudflare form prompts you to enter them securely during setup:
+#   TOKEN_SIGNING_SECRET   any long random string — signs the download tokens
+#   STRIPE_SECRET_KEY      sk_live_… (or sk_test_…) — verifies payments
+#   STRIPE_WEBHOOK_SECRET  whsec_…   — verifies Stripe webhook calls
+#   BREVO_API_KEY          xkeysib-… — sends the delivery email (optional)
+#   BREVO_FULFILLMENT_TEMPLATE_ID  numeric Brevo template id (optional)
