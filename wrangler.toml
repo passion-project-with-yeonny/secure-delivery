@@ -2,67 +2,38 @@ name = "secure-delivery"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
-# ── R2 bucket that holds your downloadable files (PDFs, templates, zips) ──────
-# The Deploy to Cloudflare button auto-creates this bucket for you during setup.
-# After deploying, upload your files into it from the Cloudflare dashboard
-# (R2 → this bucket → Upload). No command line needed.
+# ── R2 bucket that holds your downloadable files ──────────────────────────────
 [[r2_buckets]]
-binding = "ASSETS"            # the Worker refers to this as env.ASSETS
-bucket_name = "product-files" # your files live here
+binding = "ASSETS"
+bucket_name = "product-files"
 
-# ── OPTIONAL (FREE template) — store captured emails so you can export them ────
-# Only needed if you use POST /free-download and want to keep the leads. Create a
-# KV namespace in the dashboard (Storage & Databases → KV), then uncomment and
-# paste its id. Without this, free-download emails are not stored (still works).
-# [[kv_namespaces]]
-# binding = "LEADS"
-# id = "your_kv_namespace_id"
-
-# ── Plain (non-secret) settings — the deploy form will ask you for these ──────
+# ── YOUR live settings — edit values HERE; they survive every rebuild ─────────
+# (Values set only in the dashboard get reset on the next build, so the real
+#  config lives in this file.)
 [vars]
-# REQUIRED. The exact origin of your live site, used for CORS. No trailing slash.
-# Example: https://your-site.framer.website
-ALLOWED_ORIGIN = "https://your-site.framer.website"
-# How long a minted download/watch link stays valid, in minutes. 1440 = 24 hours.
+ALLOWED_ORIGIN = "https://simple-product-listing.framer.website"
 TOKEN_TTL_MINUTES = "1440"
-# ── FREE template — your freebie, set here (or in the Deploy form). NO CODE EDIT ──
-# FREE_PRODUCT_KEY      = the file's name in your R2 bucket, e.g. "free-checklist.pdf"
-# FREE_PRODUCT_FILENAME = what the visitor's browser saves it as (optional)
-# FREE_PRODUCT_NAME     = a friendly display name (optional)
-FREE_PRODUCT_KEY = ""
-FREE_PRODUCT_FILENAME = ""
-FREE_PRODUCT_NAME = ""
-# ── PAID template — set these in the Cloudflare dashboard after deploy ────────
-# (Workers & Pages → secure-delivery → Settings → Variables). Leave blank/unused
-# for the free template. The paid setup guide walks through all of these.
-#   PAID_PRODUCT_KEY      = the paid file's name in your R2 bucket, e.g. "course.zip"
-#   PAID_PRODUCT_FILENAME = what the buyer's browser saves it as (optional)
-#   PAID_PRODUCT_NAME     = shown on the Stripe checkout page, e.g. "Wellness Course"
-#   PAID_PRICE            = the price you charge, e.g. "19" or "19.99"
-#   PAID_CURRENCY         = ISO currency code, default "usd"
-#   SUCCESS_URL           = your Framer thank-you page, e.g. https://your-site.framer.website/thank-you
-#   CANCEL_URL            = where to send buyers who cancel (defaults to ALLOWED_ORIGIN)
-# Plus two SECRETS (add as encrypted vars): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
-PAID_PRODUCT_KEY = ""
-PAID_PRODUCT_FILENAME = ""
-PAID_PRODUCT_NAME = ""
-PAID_PRICE = ""
-PAID_CURRENCY = "usd"
-SUCCESS_URL = ""
-CANCEL_URL = ""
-# Display name + address shown as the sender on delivery emails (optional feature).
-SENDER_NAME = "Your Store"
-SENDER_EMAIL = "hello@yourdomain.com"
-# OPTIONAL (FREE template). If you set BREVO_API_KEY and want /free-download leads
-# dropped onto a specific Brevo list, put its numeric list id here. Adding a
-# contact does NOT send an email, so it never counts against your send limit.
-# BREVO_LIST_ID = "3"
 
-# ── SECRETS ──────────────────────────────────────────────────────────────────
-# Never written here. They are declared in .dev.vars.example so the Deploy to
-# Cloudflare form prompts you to enter them securely during setup:
-#   TOKEN_SIGNING_SECRET   any long random string — signs the download tokens
-#   STRIPE_SECRET_KEY      sk_live_… (or sk_test_…) — verifies payments
-#   STRIPE_WEBHOOK_SECRET  whsec_…   — verifies Stripe webhook calls
-#   BREVO_API_KEY          xkeysib-… — sends the delivery email (optional)
-#   BREVO_FULFILLMENT_TEMPLATE_ID  numeric Brevo template id (optional)
+# FREE template
+FREE_PRODUCT_KEY = "Fitness_Wellness_Template_Overview.pdf"
+FREE_PRODUCT_FILENAME = "Fitness_Wellness_Template_Overview.pdf"
+FREE_PRODUCT_NAME = "Fitness Wellness Template Overview"
+
+# PAID template — using the existing file for now so you can test; swap
+# PAID_PRODUCT_KEY to your real paid file once it's uploaded to product-files.
+PAID_PRODUCT_KEY = "Fitness_Wellness_Template_Overview.pdf"
+PAID_PRODUCT_FILENAME = "Wellness-Yoga-Journey.pdf"
+PAID_PRODUCT_NAME = "Wellness Yoga Journey by Tara"
+PAID_PRICE = "19"
+PAID_CURRENCY = "usd"
+SUCCESS_URL = "https://simple-product-listing.framer.website/thank-you"
+CANCEL_URL = "https://simple-product-listing.framer.website/paid"
+
+SENDER_NAME = "Passion Project With Yeonny"
+SENDER_EMAIL = "yeonny@passion-project-with-yeonny.com"
+
+# ── SECRETS (set in the Cloudflare dashboard, never here) ─────────────────────
+#   TOKEN_SIGNING_SECRET   — signs download tokens (set at deploy; persists)
+#   STRIPE_SECRET_KEY      — sk_test_… / sk_live_… (required for paid checkout)
+#   STRIPE_WEBHOOK_SECRET  — whsec_… (optional, for the backup email)
+#   BREVO_API_KEY          — optional (email delivery / contact capture)
