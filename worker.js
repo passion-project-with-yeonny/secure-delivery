@@ -7,7 +7,9 @@
 //  (b) expires. A buyer can't guess a link, and a shared link dies on its own.
 //
 //  Routes
-//    POST /issue          { paymentIntentId, email, product }  → { url, expiresAt, kind }
+//    POST /checkout       { }  → { url }   PAID template: creates a Stripe Checkout
+//                         session and returns the hosted payment-page URL to redirect to.
+//    POST /issue          { sessionId | paymentIntentId, email, product }  → { url, expiresAt, kind }
 //                         Re-checks the payment with Stripe, then mints a token.
 //    POST /free-download  { email, product }  → { url, expiresAt, kind }
 //                         FREE template: records the email (no inbox gating) and
@@ -51,8 +53,9 @@ const PRODUCTS = {
   // freebie:    { type: 'file',  key: 'free-checklist.pdf', filename: 'Free-Checklist.pdf', name: 'Free Checklist', free: true },
 };
 
-// Reserved product id for the env-var-configured freebie (the no-code FREE path).
+// Reserved product ids for the env-var-configured products (the no-code paths).
 const FREE_ID = 'free';
+const PAID_ID = 'paid';
 
 // Build the FREE template's single freebie from env vars, if configured. The buyer
 // sets these in the Deploy form and never edits PRODUCTS above.
@@ -67,10 +70,33 @@ function getFreeProduct(env) {
   };
 }
 
-// Resolve a product id → its config: the env-var freebie for FREE_ID, else the
-// PRODUCTS map. Shared by /download and /watch so both paths use one lookup.
+// Build the PAID template's single product from env vars, if configured. Same
+// no-code idea as the freebie: the buyer sets PAID_PRODUCT_* + PAID_PRICE in the
+// Deploy form and never edits PRODUCTS above.
+function getPaidProduct(env) {
+  if (!env.PAID_PRODUCT_KEY) return null;
+  return {
+    type: 'file',
+    key: env.PAID_PRODUCT_KEY,
+    filename: env.PAID_PRODUCT_FILENAME || env.PAID_PRODUCT_KEY,
+    name: env.PAID_PRODUCT_NAME || 'Your purchase',
+  };
+}
+
+// The price in the smallest currency unit (cents). PAID_PRICE is a decimal the
+// buyer types in their own currency, e.g. "19" or "19.99" → 1900 / 1999.
+function paidAmountCents(env, prod) {
+  const raw = env.PAID_PRICE != null && env.PAID_PRICE !== '' ? env.PAID_PRICE : (prod && prod.price);
+  const n = parseFloat(raw);
+  if (!isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 100);
+}
+
+// Resolve a product id → its config: the env-var freebie for FREE_ID, the env-var
+// paid product for PAID_ID, else the PRODUCTS map. Shared by all routes.
 function resolveProduct(id, env) {
   if (id === FREE_ID) return getFreeProduct(env);
+  if (id === PAID_ID) return getPaidProduct(env);
   return PRODUCTS[id] || null;
 }
 
@@ -83,6 +109,7 @@ export default {
     if (request.method === 'OPTIONS') return cors(env, new Response(null, { status: 204 }));
 
     try {
+      if (request.method === 'POST' && pathname === '/checkout')        return cors(env, await handleCheckout(request, env));
       if (request.method === 'POST' && pathname === '/issue')          return cors(env, await handleIssue(request, env));
       if (request.method === 'POST' && pathname === '/free-download')   return cors(env, await handleFreeDownload(request, env));
       if (request.method === 'GET'  && pathname === '/download')       return await handleDownload(url, env);
@@ -97,22 +124,70 @@ export default {
   },
 };
 
+// ── /checkout ── PAID: create a Stripe Checkout session, return its hosted URL ─
+// The Buy button calls this; we redirect the buyer to Stripe's payment page. No
+// card fields ever touch the site. Price + product come from env vars (no code).
+async function handleCheckout(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const paid = getPaidProduct(env);
+  const id = paid ? PAID_ID : (body && body.product);
+  const prod = paid || PRODUCTS[id];
+  if (!prod) return json({ error: 'unknown_product' }, 400);
+  if (!env.STRIPE_SECRET_KEY) return json({ error: 'stripe_not_configured' }, 500);
+
+  const amount = paidAmountCents(env, prod);
+  if (!amount) return json({ error: 'price_not_configured' }, 500);
+
+  const origin = new URL(request.url).origin;
+  const base = (env.ALLOWED_ORIGIN || origin).replace(/\/$/, '');
+  const success = (env.SUCCESS_URL || base).replace(/\/$/, '');
+  const cancel = (env.CANCEL_URL || base).replace(/\/$/, '');
+
+  const form = new URLSearchParams();
+  form.set('mode', 'payment');
+  form.set('success_url', `${success}?session_id={CHECKOUT_SESSION_ID}`);
+  form.set('cancel_url', cancel);
+  form.set('line_items[0][quantity]', '1');
+  form.set('line_items[0][price_data][currency]', (env.PAID_CURRENCY || 'usd').toLowerCase());
+  form.set('line_items[0][price_data][unit_amount]', String(amount));
+  form.set('line_items[0][price_data][product_data][name]', prod.name || 'Digital product');
+  form.set('metadata[product]', id);
+
+  const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || !data.url) return json({ error: 'checkout_failed', detail: data.error && data.error.message }, 502);
+  return json({ url: data.url, id: data.id });
+}
+
 // ── /issue ── verify payment, mint a token, return the link ──────────────────
+// Accepts either a Checkout `sessionId` (hosted Checkout flow) or a
+// `paymentIntentId` (on-site Elements flow). Either way we re-check with Stripe.
 async function handleIssue(request, env) {
   const body = await request.json().catch(() => ({}));
-  const { paymentIntentId, email, product } = body || {};
+  let { paymentIntentId, sessionId, email, product } = body || {};
 
-  const prod = PRODUCTS[product];
+  let verified = false;
+  if (sessionId) {
+    const session = await verifyCheckoutSession(sessionId, env);
+    if (!session) return json({ error: 'payment_not_verified' }, 402);
+    verified = true;
+    product = (session.metadata && session.metadata.product) || product;
+    email = (session.customer_details && session.customer_details.email) || email;
+  } else {
+    verified = await verifyPayment(paymentIntentId, env);
+  }
+  if (!verified) return json({ error: 'payment_not_verified' }, 402);
+
+  const prod = resolveProduct(product, env);
   if (!prod) return json({ error: 'unknown_product' }, 400);
-
-  // Re-check the payment with Stripe — a buyer cannot forge a "succeeded"
-  // PaymentIntent, so this is what authorizes the download.
-  const ok = await verifyPayment(paymentIntentId, env);
-  if (!ok) return json({ error: 'payment_not_verified' }, 402);
 
   const ttlMin = parseInt(env.TOKEN_TTL_MINUTES || '1440', 10);
   const exp = Math.floor(Date.now() / 1000) + ttlMin * 60;
-  const token = await signToken({ p: product, pi: paymentIntentId || '', exp }, env);
+  const token = await signToken({ p: product, pi: paymentIntentId || sessionId || '', exp }, env);
 
   const origin = new URL(request.url).origin;
   const path = prod.type === 'video' ? '/watch' : '/download';
@@ -237,22 +312,34 @@ async function handleWebhook(request, env) {
   if (!valid) return json({ error: 'bad_signature' }, 400);
 
   const event = JSON.parse(payload);
-  if (event.type !== 'payment_intent.succeeded') return json({ received: true });
 
-  const pi = event.data.object;
-  const email = pi.receipt_email || (pi.charges && pi.charges.data[0] && pi.charges.data[0].billing_details.email);
-  // The product id should be set as PaymentIntent metadata at create time
-  // (add `metadata[product]` in api/create-payment-intent.js). Falls back to a
-  // single-product store if you only sell one thing.
-  const product = (pi.metadata && pi.metadata.product) || Object.keys(PRODUCTS)[0];
-  await emailLink({ product, email, paymentIntentId: pi.id }, env, request);
+  // Hosted Checkout flow (the PAID template default).
+  if (event.type === 'checkout.session.completed') {
+    const s = event.data.object;
+    if (s.payment_status === 'paid') {
+      const product = (s.metadata && s.metadata.product) || PAID_ID;
+      const email = s.customer_details && s.customer_details.email;
+      await emailLink({ product, email, paymentIntentId: s.payment_intent || s.id }, env, request);
+    }
+    return json({ received: true });
+  }
+
+  // On-site Elements flow (PaymentIntent).
+  if (event.type === 'payment_intent.succeeded') {
+    const pi = event.data.object;
+    const email = pi.receipt_email || (pi.charges && pi.charges.data[0] && pi.charges.data[0].billing_details.email);
+    const product = (pi.metadata && pi.metadata.product) || PAID_ID;
+    await emailLink({ product, email, paymentIntentId: pi.id }, env, request);
+    return json({ received: true });
+  }
+
   return json({ received: true });
 }
 
 // ── /resend ── mint a fresh link and email it again ──────────────────────────
 async function handleResend(request, env) {
   const { paymentIntentId, email, product } = (await request.json().catch(() => ({}))) || {};
-  if (!PRODUCTS[product]) return json({ error: 'unknown_product' }, 400);
+  if (!resolveProduct(product, env)) return json({ error: 'unknown_product' }, 400);
   const ok = await verifyPayment(paymentIntentId, env);
   if (!ok) return json({ error: 'payment_not_verified' }, 402);
   await emailLink({ product, email, paymentIntentId }, env, request);
@@ -261,7 +348,7 @@ async function handleResend(request, env) {
 
 // ── Shared: build a link + send it via Brevo ─────────────────────────────────
 async function emailLink({ product, email, paymentIntentId }, env, request) {
-  const prod = PRODUCTS[product];
+  const prod = resolveProduct(product, env);
   if (!prod || !email) return;
   const ttlMin = parseInt(env.TOKEN_TTL_MINUTES || '1440', 10);
   const exp = Math.floor(Date.now() / 1000) + ttlMin * 60;
@@ -305,6 +392,19 @@ async function verifyPayment(paymentIntentId, env) {
   if (!r.ok) return false;
   const pi = await r.json();
   return pi && pi.status === 'succeeded';
+}
+
+// ── Stripe: confirm a Checkout Session was actually paid ──────────────────────
+// Returns the session object (so callers can read metadata + email) or null.
+async function verifyCheckoutSession(sessionId, env) {
+  if (!sessionId || !env.STRIPE_SECRET_KEY) return null;
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return null;
+  const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sessionId}`, {
+    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` },
+  });
+  if (!r.ok) return null;
+  const s = await r.json();
+  return s && s.payment_status === 'paid' ? s : null;
 }
 
 // ── Token: stateless, HMAC-SHA256 signed  (payload.signature) ────────────────
